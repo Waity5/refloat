@@ -22,6 +22,12 @@
 #include <stdint.h>
 
 typedef enum {
+    FOOTSENSORLESS_OFF = 0,
+    FOOTSENSORLESS_REVERSE,
+    FOOTSENSORLESS_ALL
+} FLOAT_FOOTSENSORLESS_OPERATION_TYPE;
+
+typedef enum {
     INPUTTILT_NONE = 0,
     INPUTTILT_UART,
     INPUTTILT_PPM
@@ -259,6 +265,7 @@ typedef struct {
     bool enable_quickstop;
     bool fault_darkride_enabled;
     bool fault_reversestop_enabled;
+    FLOAT_FOOTSENSORLESS_OPERATION_TYPE fault_run_without_foot_sensor;
     float tiltback_duty_angle;
     float tiltback_duty_speed;
     float tiltback_duty;

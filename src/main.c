@@ -297,6 +297,10 @@ bool can_engage(const Data *d) {
         return true;
     }
 
+    if (d->float_conf.fault_run_without_foot_sensor) {
+        return true;
+    }
+
     if (d->footpad.state == FS_LEFT || d->footpad.state == FS_RIGHT) {
         // When simple start is enabled:
         // 2 seconds after stopping we allow starting with a single sensor (e.g. for jump starts)
@@ -361,7 +365,7 @@ static bool check_faults(Data *d) {
 
         // Check switch
         // Switch fully open
-        if (d->footpad.state == FS_NONE && d->state.mode != MODE_FLYWHEEL) {
+        if (d->footpad.state == FS_NONE && d->state.mode != MODE_FLYWHEEL && !d->float_conf.fault_run_without_foot_sensor) {
             if (!disable_switch_faults) {
                 if (timer_older_ms(
                         &d->time, d->fault_switch_timer, d->float_conf.fault_delay_switch_full
@@ -391,7 +395,7 @@ static bool check_faults(Data *d) {
 
         if (d->state.sat == SAT_REVERSESTOP) {
             // ignore delays if sensor is completely disengaged while reversing
-            if (d->footpad.state == FS_NONE) {
+            if (d->footpad.state == FS_NONE && !d->float_conf.fault_run_without_foot_sensor) {
                 state_stop(&d->state, STOP_SWITCH_FULL);
                 return true;
             }
@@ -403,7 +407,7 @@ static bool check_faults(Data *d) {
         }
 
         // Switch partially open and stopped
-        if (!d->float_conf.fault_is_dual_switch) {
+        if (!d->float_conf.fault_is_dual_switch && !d->float_conf.fault_run_without_foot_sensor) {
             if (!can_engage(d) && d->motor.abs_erpm < d->float_conf.fault_adc_half_erpm) {
                 if (timer_older_ms(
                         &d->time, d->fault_switch_half_timer, d->float_conf.fault_delay_switch_half
@@ -415,9 +419,11 @@ static bool check_faults(Data *d) {
                 timer_refresh(&d->time, &d->fault_switch_half_timer);
             }
         }
+        
 
         // Check roll angle
-        if (fabsf(d->imu.roll) > d->float_conf.fault_roll) {
+        if (!(d->footpad.state == FS_BOTH && d->float_conf.fault_run_without_foot_sensor == FOOTSENSORLESS_ALL) &&
+        (fabsf(d->imu.roll) > d->float_conf.fault_roll)) {
             if (timer_older_ms(
                     &d->time, d->fault_angle_roll_timer, d->float_conf.fault_delay_roll
                 )) {
@@ -443,7 +449,8 @@ static bool check_faults(Data *d) {
     }
 
     // Check pitch angle
-    if (fabsf(d->imu.pitch) > d->float_conf.fault_pitch && fabsf(d->remote.setpoint.value) < 30) {
+    if (!(d->footpad.state == FS_BOTH && d->float_conf.fault_run_without_foot_sensor == FOOTSENSORLESS_ALL) &&
+     (fabsf(d->imu.pitch) > d->float_conf.fault_pitch && fabsf(d->remote.setpoint.value) < 30)) {
         if (timer_older_ms(&d->time, d->fault_angle_pitch_timer, d->float_conf.fault_delay_pitch)) {
             state_stop(&d->state, STOP_PITCH);
             return true;
@@ -817,6 +824,14 @@ static void refloat_thd(void *arg) {
             beep_off(d, false);
         }
 
+        if (d->float_conf.fault_run_without_foot_sensor){
+            if (d->footpad.state == FS_BOTH){
+                d->state.disable_reverse_stop = true;
+            } else if (d->footpad.state != FS_BOTH && d->motor.erpm > -1000){
+                d->state.disable_reverse_stop = false;
+            }
+        }
+
         haptic_feedback_update(
             &d->haptic_feedback,
             &d->motor_control,
@@ -866,7 +881,7 @@ static void refloat_thd(void *arg) {
                     d->motor.erpm,
                     d->setpoint_target_interpolated,
                     &d->time,
-                    d->float_conf.fault_reversestop_enabled
+                    d->float_conf.fault_reversestop_enabled && !d->state.disable_reverse_stop
                 );
             }
 

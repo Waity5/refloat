@@ -25,6 +25,7 @@ void state_init(State *state) {
     state->charging = false;
     state->wheelslip = false;
     state->darkride = false;
+    state->disable_reverse_stop = false;
 }
 
 void state_stop(State *state, StopCondition stop_condition) {
