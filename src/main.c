@@ -365,7 +365,8 @@ static bool check_faults(Data *d) {
 
         // Check switch
         // Switch fully open
-        if (d->footpad.state == FS_NONE && d->state.mode != MODE_FLYWHEEL && !d->float_conf.fault_run_without_foot_sensor) {
+        if (d->footpad.state == FS_NONE && d->state.mode != MODE_FLYWHEEL &&
+            !d->float_conf.fault_run_without_foot_sensor) {
             if (!disable_switch_faults) {
                 if (timer_older_ms(
                         &d->time, d->fault_switch_timer, d->float_conf.fault_delay_switch_full
@@ -419,11 +420,11 @@ static bool check_faults(Data *d) {
                 timer_refresh(&d->time, &d->fault_switch_half_timer);
             }
         }
-        
 
         // Check roll angle
-        if (!(d->footpad.state == FS_BOTH && d->float_conf.fault_run_without_foot_sensor == FOOTSENSORLESS_ALL) &&
-        (fabsf(d->imu.roll) > d->float_conf.fault_roll)) {
+        if (!(d->footpad.state == FS_BOTH &&
+              d->float_conf.fault_run_without_foot_sensor == FOOTSENSORLESS_ALL) &&
+            (fabsf(d->imu.roll) > d->float_conf.fault_roll)) {
             if (timer_older_ms(
                     &d->time, d->fault_angle_roll_timer, d->float_conf.fault_delay_roll
                 )) {
@@ -449,8 +450,9 @@ static bool check_faults(Data *d) {
     }
 
     // Check pitch angle
-    if (!(d->footpad.state == FS_BOTH && d->float_conf.fault_run_without_foot_sensor == FOOTSENSORLESS_ALL) &&
-     (fabsf(d->imu.pitch) > d->float_conf.fault_pitch && fabsf(d->remote.setpoint.value) < 30)) {
+    if (!(d->footpad.state == FS_BOTH &&
+          d->float_conf.fault_run_without_foot_sensor == FOOTSENSORLESS_ALL) &&
+        (fabsf(d->imu.pitch) > d->float_conf.fault_pitch && fabsf(d->remote.setpoint.value) < 30)) {
         if (timer_older_ms(&d->time, d->fault_angle_pitch_timer, d->float_conf.fault_delay_pitch)) {
             state_stop(&d->state, STOP_PITCH);
             return true;
@@ -824,10 +826,10 @@ static void refloat_thd(void *arg) {
             beep_off(d, false);
         }
 
-        if (d->float_conf.fault_run_without_foot_sensor){
-            if (d->footpad.state == FS_BOTH){
+        if (d->float_conf.fault_run_without_foot_sensor) {
+            if (d->footpad.state == FS_BOTH) {
                 d->state.disable_reverse_stop = true;
-            } else if (d->footpad.state != FS_BOTH && d->motor.erpm > -1000){
+            } else if (d->footpad.state != FS_BOTH && d->motor.erpm > -1000) {
                 d->state.disable_reverse_stop = false;
             }
         }
