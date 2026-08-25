@@ -51,6 +51,7 @@
 #include "conf/datatypes.h"
 
 #include "konami.h"
+#include "latency_tracker.h"
 
 #include <math.h>
 #include <string.h>
@@ -185,6 +186,8 @@ static void reconfigure(Data *d) {
     haptic_feedback_configure(&d->haptic_feedback, &d->float_conf);
     alert_tracker_configure(&d->alert_tracker, &d->float_conf);
 
+    leds_configure(&d->leds, &d->float_conf.leds);
+
     d->startup_pitch_trickmargin = d->float_conf.startup_dirtylandings_enabled ? 10 : 0;
     d->tiltback_variable =
         d->float_conf.tiltback_variable / 1000 * sign(d->float_conf.tiltback_variable_max);
@@ -205,9 +208,8 @@ static void configure(Data *d) {
     // the old setup with it being the main balancing filter. In that case, set
     // the kp and acc confidence decay to hardcoded defaults of the former true
     // pitch filter, to preserve the behavior of the old setup in the new one.
-    // (Though Mahony KP 0.4 instead of 0.2 is used, as it seems to work better)
     if (VESC_IF->get_cfg_float(CFG_PARAM_IMU_mahony_kp) > 1) {
-        VESC_IF->set_cfg_float(CFG_PARAM_IMU_mahony_kp, 0.4);
+        VESC_IF->set_cfg_float(CFG_PARAM_IMU_mahony_kp, 0.2);
         VESC_IF->set_cfg_float(CFG_PARAM_IMU_mahony_ki, 0);
         VESC_IF->set_cfg_float(CFG_PARAM_IMU_accel_confidence_decay, 0.1);
     }
@@ -742,6 +744,8 @@ static void imu_ref_callback(float *acc, float *gyro, float *mag, float dt) {
     unused(mag);
     Data *d = (Data *) ARG;
 
+    latency_tracker_update(&d->imu_latency_tracker, dt);
+
     time_t time = vesc_system_time_ticks();
 
     balance_filter_update(&d->balance_filter, gyro, acc, dt);
@@ -1203,6 +1207,7 @@ static void data_init(Data *d) {
         imu_sample_rate = 620;
     }
     frequency_tracker_init(&d->imu_freq_tracker, imu_sample_rate, &d->time);
+    latency_tracker_init(&d->imu_latency_tracker);
 
     balance_filter_init(&d->balance_filter);
 
@@ -1225,22 +1230,25 @@ static void data_init(Data *d) {
     reverse_stop_init(&d->reverse_stop);
 
     leds_init(&d->leds);
+    leds_setup(&d->leds, &d->float_conf.hardware.leds, &d->float_conf.leds);
     lcm_init(&d->lcm, &d->float_conf.hardware.leds);
     charging_init(&d->charging);
     bms_init(&d->bms);
 
     data_recorder_init(&d->data_record, imu_sample_rate);
 
-    konami_init(&d->flywheel_konami, flywheel_konami_sequence, sizeof(flywheel_konami_sequence));
+    konami_init(
+        &d->flywheel_konami, flywheel_konami_sequence, array_size(flywheel_konami_sequence)
+    );
     konami_init(
         &d->headlights_on_konami,
         headlights_on_konami_sequence,
-        sizeof(headlights_on_konami_sequence)
+        array_size(headlights_on_konami_sequence)
     );
     konami_init(
         &d->headlights_off_konami,
         headlights_off_konami_sequence,
-        sizeof(headlights_off_konami_sequence)
+        array_size(headlights_off_konami_sequence)
     );
 
     ema_init(&d->balance_current);
@@ -2408,15 +2416,15 @@ static void cmd_info(const Data *d, unsigned char *buf, int len) {
 // Handler for incoming app commands
 static void on_command_received(unsigned char *buffer, unsigned int len) {
     Data *d = (Data *) ARG;
-    uint8_t magicnr = buffer[0];
-    uint8_t command = buffer[1];
-
     if (len < 2) {
-        log_error("Received command data too short.");
+        log_error("Received command data too short: %u bytes.", len);
         return;
     }
+
+    uint8_t magicnr = buffer[0];
+    uint8_t command = buffer[1];
     if (magicnr != 101) {
-        log_error("Invalid Package ID: %u", magicnr);
+        log_error("Invalid Package ID: %u", (unsigned) magicnr);
         return;
     }
 
@@ -2592,6 +2600,7 @@ static lbm_value ext_bms(lbm_value *args, lbm_uint argn) {
         d->bms.cell_ht = VESC_IF->lbm_dec_as_i32(args[3]);
         d->bms.bms_ht = VESC_IF->lbm_dec_as_i32(args[4]);
         d->bms.msg_age = VESC_IF->lbm_dec_as_float(args[5]);
+        timer_refresh(&d->time, &d->bms.push_timer);
     }
 
     return d->float_conf.bms.enabled ? VESC_IF->lbm_enc_sym_true : VESC_IF->lbm_enc_sym_nil;
@@ -2646,7 +2655,6 @@ static bool set_cfg(uint8_t *buffer) {
     if (res) {
         write_cfg_to_eeprom(d);
         configure(d);
-        leds_configure(&d->leds, &d->float_conf.leds);
     }
 
     return res;
@@ -2715,9 +2723,6 @@ INIT_FUN(lib_info *info) {
         VESC_IF->request_terminate(d->main_thread);
         return false;
     }
-
-    footpad_sensor_update(&d->footpad, &d->float_conf);
-    leds_setup(&d->leds, &d->float_conf.hardware.leds, &d->float_conf.leds);
 
     VESC_IF->imu_set_read_callback(imu_ref_callback);
     VESC_IF->conf_custom_add_config(get_cfg, set_cfg, get_cfg_xml);
